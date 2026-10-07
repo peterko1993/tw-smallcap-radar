@@ -10,8 +10,8 @@ REPORT_FILE = "radar_report.json"
 
 FEE_RATE = 0.001425 * 0.5
 TAX_RATE = 0.003
-SLOT_BUDGET = 120000.0  # 💡 小型股專屬：每個槽位 12 萬元
-MAX_SLOTS = 5           # 💡 5 個槽位分散風險
+SLOT_BUDGET = 120000.0  # 每個槽位 12 萬元
+MAX_SLOTS = 5           # 5 個槽位分散風險
 
 def load_json(filepath, default):
     if not os.path.exists(filepath): return default
@@ -24,7 +24,7 @@ def save_json(filepath, data):
 
 def run_tracker():
     today_str = datetime.date.today().strftime("%Y-%m-%d")
-    print(f"🚀 [Tracker] 啟動小型股 5 槽位追蹤引擎 ({today_str})...")
+    print(f"🚀 [Tracker] 啟動小型股 5 槽位星級追蹤引擎 ({today_str})...")
 
     positions = load_json(POSITIONS_FILE, [])
     report = load_json(REPORT_FILE, {})
@@ -65,7 +65,7 @@ def run_tracker():
             latest = df.iloc[-1]
             high, low, close, ma10 = float(latest['High']), float(latest['Low']), float(latest['Close']), float(latest['MA10'])
             
-            # 開盤交易日天數 (嚴格排除假日)
+            # 開盤交易日天數
             trade_dates_after = [idx.strftime('%Y-%m-%d') for idx in df.index if idx.strftime('%Y-%m-%d') > entry_d]
             d = len(trade_dates_after)
             pos['days_held'] = d
@@ -156,9 +156,12 @@ def run_tracker():
         except Exception as e:
             remaining_positions.append(pos)
 
-    # ================= 2. 次日右側過高確認建倉 =================
+    # ================= 2. 依星級優先開新倉 (3星黃金狙擊優先開倉) =================
     open_slots = MAX_SLOTS - len(remaining_positions)
     squat_candidates = [s for s in report.get("stocks", []) if s.get("is_squat")]
+    
+    # 💡 核心機制：星級高的標的 (3星 > 2星) 優先搶佔開倉名額！
+    squat_candidates.sort(key=lambda x: (x.get('rank_score', 2), x.get('trust_buy', 0) + x.get('inst_buy', 0)), reverse=True)
     report_scan_date = report.get("trade_date", "")
 
     if open_slots > 0 and squat_candidates:
@@ -174,9 +177,8 @@ def run_tracker():
             cand_scan_d = str(cand.get('scan_date', report_scan_date)).replace('-', '')
             today_clean = today_str.replace('-', '')
             
-            # 若為當天盤後剛掃出，當天市場已收盤，等待次日盤中確認
             if cand_scan_d >= today_clean:
-                print(f"   ⏳ [候選待命] {cand_name} ({cand_code}) 為今日盤後深蹲，次日開盤檢驗突破 ${right_trigger}")
+                print(f"   ⏳ [候選待命] {cand['star_label']} {cand_name} ({cand_code}) 次日檢驗突破 ${right_trigger}")
                 continue
             
             try:
@@ -189,7 +191,6 @@ def run_tracker():
                 t1_open = float(latest_cand['Open'])
                 t1_close = float(latest_cand['Close'])
                 
-                # 次日盤中突破前日高點才准進場
                 if t1_high >= right_trigger:
                     buy_price = max(t1_open, right_trigger)
                     total_shares = int(SLOT_BUDGET / (buy_price * (1 + FEE_RATE)))
@@ -211,10 +212,11 @@ def run_tracker():
                         "curr_stop": round(buy_price * 0.95, 1),
                         "tp_stage1": round(buy_price * 1.08, 1),
                         "ma10": round(float(df_cand['Close'].rolling(10).mean().iloc[-1]), 1) if len(df_cand) >= 10 else round(buy_price * 0.99, 1),
-                        "is_extended": False
+                        "is_extended": False,
+                        "star_tag": "🌟🌟🌟 3星" if cand.get('rank_score') == 3 else "🌟🌟 2星"
                     })
                     open_slots -= 1
-                    print(f"   🎯 [右側確認進場] {cand_name} ({cand_code}) 正式於 {today_str} 建倉！成本 ${buy_price}")
+                    print(f"   🎯 [右側確認進場] {cand.get('star_label')} {cand_name} ({cand_code}) 正式建倉！成本 ${buy_price}")
             except Exception: pass
 
     save_json(POSITIONS_FILE, remaining_positions)
@@ -223,7 +225,7 @@ def run_tracker():
         df_history = pd.concat([df_history, df_new], ignore_index=True)
         df_history.to_csv(HISTORY_FILE, index=False, encoding="utf-8-sig")
 
-    print(f"✅ [Tracker 完成] 在倉持股：{len(remaining_positions)}/5 檔，累積結案：{len(df_history)} 筆")
+    print(f"✅ [Tracker 完成] 在倉部位：{len(remaining_positions)}/5 檔，累積結案：{len(df_history)} 筆")
 
 if __name__ == "__main__":
     run_tracker()
