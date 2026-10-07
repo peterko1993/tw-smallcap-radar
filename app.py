@@ -116,8 +116,11 @@ def resolve_taiwan_stock(query):
     for c, s in universe.items():
         if s['name'] == q: return s, None
     cands = [s for s in universe.values() if (q in s['name']) or (q == s['code'])]
-    if len(cands) == 1: return cands[0], None
-    elif len(cands) > 1: return None, f"符合多檔：{ '、'.join([f'{x[\"name\"]} ({x[\"code\"]})' for x in cands[:4]]) }，請更精確輸入"
+    if len(cands) == 1:
+        return cands[0], None
+    elif len(cands) > 1:
+        cand_str = "、".join([f"{x['name']} ({x['code']})" for x in cands[:4]])
+        return None, f"符合多檔：{cand_str}，請更精確輸入"
     return None, f"查無台股標的「{q}」"
 
 if "watchlist" not in st.session_state:
