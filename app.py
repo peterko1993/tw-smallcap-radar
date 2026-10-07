@@ -20,11 +20,15 @@ HISTORY_FILE = "trade_history.csv"
 FEE_RATE = 0.001425 * 0.5
 TAX_RATE = 0.003
 
+# 經典小型爆發熱門股預設字典 (支援新舊格式相容)
 DEFAULT_STOCKS = {
-    "系統電 (5309)": "5309.TWO", "雙鴻 (3324)": "3324.TWO",
-    "定穎投控 (6187)": "6187.TW", "閎康 (3587)": "3587.TWO",
-    "弘塑 (3131)": "3131.TWO", "台燿 (6274)": "6274.TWO",
-    "致伸 (4915)": "4915.TW"
+    "系統電 (5309)": {"ticker": "5309.TWO", "added_price": 53.8, "added_date": "2026-09-25"},
+    "雙鴻 (3324)": {"ticker": "3324.TWO", "added_price": 760.0, "added_date": "2026-09-25"},
+    "定穎投控 (6187)": {"ticker": "6187.TW", "added_price": 82.5, "added_date": "2026-09-28"},
+    "閎康 (3587)": {"ticker": "3587.TWO", "added_price": 240.0, "added_date": "2026-09-28"},
+    "弘塑 (3131)": {"ticker": "3131.TWO", "added_price": 1650.0, "added_date": "2026-09-30"},
+    "台燿 (6274)": {"ticker": "6274.TWO", "added_price": 165.0, "added_date": "2026-10-01"},
+    "致伸 (4915)": {"ticker": "4915.TW", "added_price": 63.5, "added_date": "2026-10-01"}
 }
 
 TW_INDUSTRY_MAP = {
@@ -73,6 +77,16 @@ def save_json(filepath, data):
 def save_history_csv(df):
     df.to_csv(HISTORY_FILE, index=False, encoding="utf-8-sig")
     with open(HISTORY_FILE, "rb") as f: push_file_to_github(HISTORY_FILE, f.read())
+
+# 💡 解析自選股項目（新舊格式相容）：支援字典物件與純字串 ticker
+def parse_watchlist_entry(entry_val):
+    if isinstance(entry_val, dict):
+        return (
+            entry_val.get("ticker", ""),
+            float(entry_val.get("added_price", 0.0)) if entry_val.get("added_price") else None,
+            entry_val.get("added_date", "")
+        )
+    return str(entry_val).strip(), None, ""
 
 @st.cache_data(ttl=1800)
 def get_twii_market_status():
@@ -142,9 +156,23 @@ with st.sidebar:
             info, err = resolve_taiwan_stock(sb_q)
             if info:
                 lbl = f"{info['name']} ({info['code']})"
-                st.session_state.watchlist[lbl] = f"{info['code']}{info['market']}"
+                full_ticker = f"{info['code']}{info['market']}"
+                today_s = datetime.date.today().strftime("%Y-%m-%d")
+                
+                # 自動抓取當前收盤價作為選入基準價
+                latest_p = None
+                try:
+                    df_tmp = yf.download(full_ticker, period="5d", interval="1d", progress=False)
+                    if not df_tmp.empty: latest_p = round(float(df_tmp['Close'].iloc[-1]), 1)
+                except Exception: pass
+                
+                st.session_state.watchlist[lbl] = {
+                    "ticker": full_ticker,
+                    "added_price": latest_p,
+                    "added_date": today_s
+                }
                 save_json(WATCHLIST_FILE, st.session_state.watchlist)
-                st.success(f"已新增：{lbl}")
+                st.success(f"已新增：{lbl}（選入基準價：${latest_p if latest_p else '計算中'}）")
                 st.rerun()
             else: st.error(err)
 
@@ -172,10 +200,10 @@ tab_radar, tab_tracker, tab_batch, tab_watchlist, tab_docs = st.tabs([
     "📖 小型爆發作戰手冊"
 ])
 
-# ================= TAB 0: 每日小型動能戰報 (星級評分呈現) =================
+# ================= TAB 0: 每日小型動能戰報 =================
 with tab_radar:
     c_title, c_scan = st.columns([3, 1.4])
-    with c_title: st.subheader("📡 小型爆發股雷達・今日盤後戰報 (分級星號評分制)")
+    with c_title: st.subheader("📡 小型爆發股雷達・今日盤後戰報 (方案 A 星級評分制)")
     with c_scan: btn_manual_scan = st.button("⚡ 手動立即掃描雷達", type="primary", use_container_width=True)
 
     if btn_manual_scan:
@@ -216,7 +244,6 @@ with tab_radar:
                 with st.container():
                     c1, c2, c3, c4 = st.columns([2.2, 1.8, 2.0, 2.0])
                     
-                    # 💡 徽章凸顯星級
                     if s_stars == 3:
                         c1.markdown(f"### 🏆 **{s_name} ({s_code})**")
                         c1.markdown("**:red[🌟🌟🌟 3星・黃金狙擊點 (MACD+KD)]**")
@@ -230,7 +257,7 @@ with tab_radar:
                     c2.write(f"• **投信買超**：`+{s['trust_buy']}` 張")
                     c2.write(f"• **三大法人**：`+{s.get('inst_buy', 0)}` 張")
                     c2.write(f"• **營收 YoY**：`+{s['rev_yoy']}%`")
-                    c2.write(f"• **技術位階**：`K:{s.get('k_val', 0)} / D:{s.get('d_val', 0)}` (DIF: {s.get('dif_val', 0)})")
+                    c2.write(f"• **指標狀態**：`K:{s.get('k_val', 0)} / D:{s.get('d_val', 0)}` (DIF: {s.get('dif_val', 0)})")
                     
                     c3.write(f"• **🎯 明日右側確認**：`突破 ${s.get('right_trigger', s['close'])}`")
                     c3.write(f"• **硬停損 (-5%)**：`${s['stop_loss']}`")
@@ -239,7 +266,12 @@ with tab_radar:
                     label_key = f"{s_name} ({s_code})"
                     if label_key not in st.session_state.watchlist:
                         if c4.button(f"📥 加到自選名單", key=f"r_add_{s_code}"):
-                            st.session_state.watchlist[label_key] = s['ticker']
+                            # 💡 同步存入當日最新價為「選入時價格」
+                            st.session_state.watchlist[label_key] = {
+                                "ticker": s['ticker'],
+                                "added_price": s['close'],
+                                "added_date": str(datetime.date.today())
+                            }
                             save_json(WATCHLIST_FILE, st.session_state.watchlist)
                             st.rerun()
                     else: c4.write("✅ 已在自選名單中")
@@ -376,7 +408,8 @@ with tab_batch:
     st.subheader("🚀 自選股今日小型動能深蹲掃描")
     if st.button("⚡ 開始全自選股技術體檢", type="primary", use_container_width=True):
         triggered_list = []
-        for label, ticker in st.session_state.watchlist.items():
+        for label, val in st.session_state.watchlist.items():
+            ticker, _, _ = parse_watchlist_entry(val)
             try:
                 df = yf.download(ticker, period="3mo", interval="1d", progress=False)
                 if df.empty or len(df) < 25: continue
@@ -413,20 +446,175 @@ with tab_batch:
             st.dataframe(pd.DataFrame(triggered_list), use_container_width=True, hide_index=True)
         else: st.warning("今日自選股中無標的符合深蹲條件。")
 
-# ================= TAB 3: 自選股票清單總覽 =================
+# ================= TAB 3: 自選股票清單總覽 (🌟 升級版戰術儀表板) =================
 with tab_watchlist:
-    st.subheader("📋 自選股票清單總覽")
+    st.subheader("📋 自選股票清單總覽 (戰術價位 ＋ 三大技術指標 ＋ 星級評級)")
+    
     profiles = get_all_taiwan_stocks()
-    rows = []
-    for label, ticker in st.session_state.watchlist.items():
-        code = ticker.split(".")[0].strip()
-        p = profiles.get(code, {})
-        rows.append({
-            "標的代號": label, "產業類別": p.get("industry", "電子科技"),
-            "股本規模": f"{p.get('cap', 0)}億" if p.get('cap') else "小型股",
-            "市場別": p.get("market_name", "上櫃")
-        })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    watchlist_items = list(st.session_state.watchlist.items())
+    
+    if not watchlist_items:
+        st.info("目前自選清單為空，可由側邊欄或雷達戰報加入股票。")
+    else:
+        with st.spinner("正在即時計算自選股之選入損益、三大技術指標 (MACD/KD/RSI) 與星級評級..."):
+            tickers = [parse_watchlist_entry(v)[0] for _, v in watchlist_items]
+            try:
+                df_all = yf.download(tickers, period="4mo", interval="1d", progress=False)
+            except Exception:
+                df_all = pd.DataFrame()
+
+            rows = []
+            star3_count, star2_count = 0, 0
+            
+            for label, val in watchlist_items:
+                ticker, added_p, added_d = parse_watchlist_entry(val)
+                code = ticker.split(".")[0].strip()
+                p_info = profiles.get(code, {})
+                ind_name = p_info.get("industry", "電子科技")
+                cap_val = p_info.get("cap", 0.0)
+                
+                # 行情資料切片
+                sub_df = None
+                try:
+                    if not df_all.empty:
+                        if isinstance(df_all.columns, pd.MultiIndex):
+                            sub_df = df_all.xs(ticker, axis=1, level=1).dropna(how='all')
+                        else:
+                            sub_df = df_all.dropna(how='all')
+                except Exception:
+                    sub_df = None
+
+                if sub_df is not None and len(sub_df) >= 30:
+                    sub_df = sub_df.copy()
+                    
+                    # 1. 均線與均量
+                    sub_df['MA5'] = sub_df['Close'].rolling(5).mean()
+                    sub_df['MA10'] = sub_df['Close'].rolling(10).mean()
+                    sub_df['MA20'] = sub_df['Close'].rolling(20).mean()
+                    sub_df['VOL_MA5'] = sub_df['Volume'].rolling(5).mean()
+                    sub_df['VOL_MA20'] = sub_df['Volume'].rolling(20).mean()
+
+                    # 2. MACD (12, 26, 9)
+                    ema12 = sub_df['Close'].ewm(span=12, adjust=False).mean()
+                    ema26 = sub_df['Close'].ewm(span=26, adjust=False).mean()
+                    sub_df['DIF'] = ema12 - ema26
+                    sub_df['MACD_SIG'] = sub_df['DIF'].ewm(span=9, adjust=False).mean()
+                    sub_df['OSC'] = sub_df['DIF'] - sub_df['MACD_SIG']
+
+                    # 3. KD (9, 3, 3)
+                    low9 = sub_df['Low'].rolling(9).min()
+                    high9 = sub_df['High'].rolling(9).max()
+                    rsv = (sub_df['Close'] - low9) / (high9 - low9 + 1e-9) * 100
+                    k_list, d_list = [50.0], [50.0]
+                    for r in rsv.fillna(50):
+                        new_k = (k_list[-1] * 2 / 3) + (r * 1 / 3)
+                        new_d = (d_list[-1] * 2 / 3) + (new_k * 1 / 3)
+                        k_list.append(new_k)
+                        d_list.append(new_d)
+                    sub_df['K'] = k_list[1:]
+                    sub_df['D'] = d_list[1:]
+
+                    # 4. RSI (14)
+                    delta = sub_df['Close'].diff()
+                    gain = delta.clip(lower=0)
+                    loss = -delta.clip(upper=0)
+                    avg_gain = gain.ewm(com=13, adjust=False).mean()
+                    avg_loss = loss.ewm(com=13, adjust=False).mean()
+                    rs = avg_gain / (avg_loss + 1e-9)
+                    sub_df['RSI14'] = 100 - (100 / (1 + rs))
+
+                    latest = sub_df.iloc[-1]
+                    prev = sub_df.iloc[-2]
+                    
+                    c_now = float(latest['Close'])
+                    high_now = float(latest['High'])
+                    low_now = float(latest['Low'])
+                    open_now = float(latest['Open'])
+                    vol_now = float(latest['Volume'])
+                    ma5, ma10, ma20 = float(latest['MA5']), float(latest['MA10']), float(latest['MA20'])
+                    vol_ma5, vol_ma20 = float(latest['VOL_MA5']), float(latest['VOL_MA20'])
+
+                    # 💡 檢查三大技術指標命中狀態
+                    matched_indicators = []
+                    
+                    # (A) MACD 動能判定
+                    cond_macd = (latest['DIF'] > 0) and ((latest['OSC'] > prev['OSC']) or (latest['OSC'] > 0))
+                    if cond_macd: matched_indicators.append("MACD")
+                    
+                    # (B) KD 黃金轉折判定
+                    cond_kd = (30.0 <= latest['K'] <= 65.0) and ((latest['K'] > prev['K']) or (latest['K'] >= latest['D']))
+                    if cond_kd: matched_indicators.append("KD")
+                    
+                    # (C) RSI 多方蓄勢判定
+                    cond_rsi = (40.0 <= latest['RSI14'] <= 65.0)
+                    if cond_rsi: matched_indicators.append("RSI")
+
+                    ind_badge = " ".join([f"✅{x}" for x in matched_indicators]) if matched_indicators else "⚪ 整理中"
+
+                    # 💡 基礎深蹲檢驗
+                    cond_trend = (ma5 > ma10) and (ma10 >= ma20) and (ma20 >= sub_df['MA20'].iloc[-4])
+                    touch_5 = (low_now <= ma5 * 1.018 and c_now >= ma5 * 0.99)
+                    touch_10 = (low_now <= ma10 * 1.020 and c_now >= ma10 * 0.99)
+                    cond_vol = (vol_now < vol_ma5) and (vol_now < vol_ma20)
+                    cond_k = abs(c_now - open_now) / open_now <= 0.035
+                    is_squat = cond_trend and (touch_5 or touch_10) and cond_vol and cond_k
+
+                    # 💡 醒目星級評級
+                    if is_squat and cond_macd and cond_kd:
+                        star_badge = "🌟🌟🌟 3星 (黃金狙擊)"
+                        star3_count += 1
+                    elif is_squat and cond_macd:
+                        star_badge = "🌟🌟 2星 (強勢動能)"
+                        star2_count += 1
+                    elif is_squat:
+                        star_badge = "🌟 1星 (深蹲成形)"
+                    elif c_now >= ma20:
+                        star_badge = "🟢 守穩月線"
+                    else:
+                        star_badge = "🔻 月線反壓"
+
+                    # 💡 選入時基準價與損益對照
+                    if added_p and added_p > 0:
+                        gain_pct = ((c_now - added_p) / added_p) * 100
+                        added_display = f"${added_p:,.1f} ({gain_pct:+.1f}%)"
+                    else:
+                        added_display = f"${c_now:,.1f} (基準)"
+
+                    # 戰術三本柱價位
+                    entry_trigger = f"突破 ${high_now:,.1f}"
+                    stop_loss_p = f"${high_now * 0.95:,.1f}"
+                    take_profit_p = f"${c_now * 1.08:,.1f}"
+
+                else:
+                    star_badge = "無資料"
+                    c_now = 0.0
+                    added_display = "-"
+                    entry_trigger, stop_loss_p, take_profit_p = "-", "-", "-"
+                    ind_badge = "無資料"
+
+                rows.append({
+                    "評級": star_badge,
+                    "股票標的": label,
+                    "類股 (股本)": f"{ind_name} ({cap_val}億)" if cap_val > 0 else ind_name,
+                    "選入基準價 (損益)": added_display,
+                    "最新現價": f"${c_now:,.1f}" if c_now > 0 else "無資料",
+                    "🎯 右側進場點": entry_trigger,
+                    "🛑 硬停損 (-5%)": stop_loss_p,
+                    "🏆 停利 (+8%)": take_profit_p,
+                    "符合技術指標": ind_badge
+                })
+
+        # 頂部戰情指標卡
+        c_m1, c_m2, c_m3 = st.columns(3)
+        c_m1.metric("自選總標的數", f"{len(rows)} 檔")
+        c_m2.metric("🏆 🌟🌟🌟 3星黃金狙擊標的", f"{star3_count} 檔")
+        c_m3.metric("🔥 🌟🌟 2星強勢動能標的", f"{star2_count} 檔")
+        st.write("---")
+
+        df_table = pd.DataFrame(rows)
+        st.dataframe(df_table, use_container_width=True, hide_index=True)
+        
+        st.caption("💡 說明：【選入基準價】為加入清單時之成本；【三大技術指標】分別為 MACD（多方動能增強）、KD（30~65黃金打勾）、RSI（40~65蓄勢區間）；若同時觸發深蹲與 MACD+KD，自動升級為 🌟🌟🌟 3星黃金狙擊點！")
 
 # ================= TAB 4: 小型爆發作戰手冊 =================
 with tab_docs:
@@ -435,7 +623,7 @@ with tab_docs:
 
     with st.expander("🔍 一、 2»1»4»3 漏斗 ＋ 方案 A 星級評分 SOP", expanded=True):
         st.write("• **第 1 步【第二道・籌碼密集度】**：投信近 5 日累計買超 >= 15 張，或三大法人合計買超 >= 80 張。")
-        st.write("• **第 2 步【第一道・規模與健康流動性】**：實收資本額 5 億 ～ 20 億元，且近 5 日日均量 >= 500 張。")
+        st.write("• **第 2 步【第一道・規模與健康流動性】**：實收資本額 5 億 ～ 20 億元，且近 5 日日均量 >= 500 張 (防止滑價)。")
         st.write("• **第 3 步【第四道・技術面深蹲壓縮 ＋ MACD 核心動能】**：回踩 5MA 或 10MA，成交量低於 5MV & 20MV，K 棒實體振幅 <= 3.5%，且 **MACD DIF > 0 柱狀體翻紅或縮短**。")
         st.write("• **第 4 步【第三道・營收動能加速】**：最新單月營收年增率 YoY >= 20.0%。")
         st.write("• **🌟🌟🌟 3 星黃金狙擊點判定**：若同時滿足上述條件 ＋ **KD 位於 30～65 且轉折向上/金叉**，標記為 3 星，實盤系統優先分配資金開倉！")
