@@ -20,7 +20,6 @@ HISTORY_FILE = "trade_history.csv"
 FEE_RATE = 0.001425 * 0.5
 TAX_RATE = 0.003
 
-# 經典小型爆發熱門股
 DEFAULT_STOCKS = {
     "系統電 (5309)": "5309.TWO", "雙鴻 (3324)": "3324.TWO",
     "定穎投控 (6187)": "6187.TW", "閎康 (3587)": "3587.TWO",
@@ -173,14 +172,14 @@ tab_radar, tab_tracker, tab_batch, tab_watchlist, tab_docs = st.tabs([
     "📖 小型爆發作戰手冊"
 ])
 
-# ================= TAB 0: 每日小型動能戰報 =================
+# ================= TAB 0: 每日小型動能戰報 (星級評分呈現) =================
 with tab_radar:
     c_title, c_scan = st.columns([3, 1.4])
-    with c_title: st.subheader("📡 小型爆發股雷達・今日盤後戰報")
+    with c_title: st.subheader("📡 小型爆發股雷達・今日盤後戰報 (分級星號評分制)")
     with c_scan: btn_manual_scan = st.button("⚡ 手動立即掃描雷達", type="primary", use_container_width=True)
 
     if btn_manual_scan:
-        with st.spinner("🚀 正在連線 2»1»4»3 小型股漏斗引擎... (約需 15 秒)"):
+        with st.spinner("🚀 正在連線 2»1»4»3 小型股漏斗 ＋ 星級評分引擎... (約需 15 秒)"):
             try:
                 import screener, tracker
                 importlib.reload(screener)
@@ -204,20 +203,34 @@ with tab_radar:
         
         squat_stocks = [s for s in report.get("stocks", []) if s.get("is_squat")]
         if squat_stocks:
-            st.success(f"🎯 **【今日焦點】：共發現 {len(squat_stocks)} 檔小型飆股符合深蹲起跳門檻！**")
+            three_stars = [s for s in squat_stocks if s.get('rank_score') == 3]
+            two_stars = [s for s in squat_stocks if s.get('rank_score') == 2]
+            
+            st.success(f"🎯 **【今日焦點】：共發現 {len(squat_stocks)} 檔小型飆股符合深蹲門檻（含 🌟🌟🌟 3 星黃金狙擊 {len(three_stars)} 檔、🌟🌟 2 星強勢動能 {len(two_stars)} 檔）！**")
+            
             for s in squat_stocks:
                 s_name = s.get('name', '')
                 s_code = str(s.get('code', '')).split('.')[0].strip()
+                s_stars = s.get('rank_score', 2)
+                
                 with st.container():
                     c1, c2, c3, c4 = st.columns([2.2, 1.8, 2.0, 2.0])
-                    c1.markdown(f"### **{s_name} ({s_code})**")
-                    c1.caption(f"最新收盤：${s['close']} ｜ 支撐：**{s['support']}**")
+                    
+                    # 💡 徽章凸顯星級
+                    if s_stars == 3:
+                        c1.markdown(f"### 🏆 **{s_name} ({s_code})**")
+                        c1.markdown("**:red[🌟🌟🌟 3星・黃金狙擊點 (MACD+KD)]**")
+                    else:
+                        c1.markdown(f"### **{s_name} ({s_code})**")
+                        c1.markdown("**:orange[🌟🌟 2星・強勢動能點 (MACD)]**")
+                        
+                    c1.caption(f"最新收盤：${s['close']} ｜ 支撐：**{s['support']}** ｜ 股本：{s['cap']}億")
                     c1.write(f"🏷️ **類股**：`{translate_industry(s.get('industry', '電子科技'))}`")
-                    c1.write(f"🏢 **規模**：`{s.get('cap_bracket', str(s.get('cap', '')) + '億')}`")
                     
                     c2.write(f"• **投信買超**：`+{s['trust_buy']}` 張")
                     c2.write(f"• **三大法人**：`+{s.get('inst_buy', 0)}` 張")
                     c2.write(f"• **營收 YoY**：`+{s['rev_yoy']}%`")
+                    c2.write(f"• **技術位階**：`K:{s.get('k_val', 0)} / D:{s.get('d_val', 0)}` (DIF: {s.get('dif_val', 0)})")
                     
                     c3.write(f"• **🎯 明日右側確認**：`突破 ${s.get('right_trigger', s['close'])}`")
                     c3.write(f"• **硬停損 (-5%)**：`${s['stop_loss']}`")
@@ -276,6 +289,7 @@ with tab_tracker:
             tp1_display = "✅ 半倉已停利" if p.get('lot_a_sold') else f"🎯 ${entry_p * 1.08:.1f} (+8%)"
 
             pos_display.append({
+                "評級": p.get('star_tag', "🌟🌟 2星"),
                 "標的": f"{p['name']} ({p['code']})",
                 "進場日": p['entry_date'],
                 "交易日進度": day_str,
@@ -287,7 +301,6 @@ with tab_tracker:
             })
         st.dataframe(pd.DataFrame(pos_display), use_container_width=True, hide_index=True)
         
-        # 手動平倉面板
         with st.expander("🎯 手動平倉結案（自訂出場價記帳至歷史明細）", expanded=False):
             c_cl1, c_cl2, c_cl3 = st.columns(3)
             with c_cl1:
@@ -324,7 +337,6 @@ with tab_tracker:
                     st.rerun()
     else: st.info("目前無在倉持股，5 個槽位 (共 60 萬資金) 100% 待命中。")
 
-    # 一鍵撤回歷史記錄面板
     if not df_history.empty:
         with st.expander("🔄 誤結案一鍵還原（撤回歷史紀錄並重返在倉監控）", expanded=False):
             h_opts = [f"第{i+1}筆：{r['名稱']} ({r['代號']}) - 進場日:{r['進場日']}" for i, r in df_history.iterrows()]
@@ -341,7 +353,8 @@ with tab_tracker:
                     "shares_b": int(float(h_row['投入金額'])/float(h_row['進場價'])//2), "days_held": int(h_row.get('持股天數', 2)),
                     "is_breakeven": False, "lot_a_sold": False, "curr_price": float(h_row['進場價']),
                     "unrealized_pct": 0.0, "curr_stop": round(float(h_row['進場價']) * 0.95, 1),
-                    "tp_stage1": round(float(h_row['進場價']) * 1.08, 1), "ma10": round(float(h_row['進場價']) * 0.99, 1)
+                    "tp_stage1": round(float(h_row['進場價']) * 1.08, 1), "ma10": round(float(h_row['進場價']) * 0.99, 1),
+                    "star_tag": "🌟🌟 2星"
                 }
                 positions.append(restored_p)
                 save_json(POSITIONS_FILE, positions)
@@ -417,17 +430,18 @@ with tab_watchlist:
 
 # ================= TAB 4: 小型爆發作戰手冊 =================
 with tab_docs:
-    st.subheader("📖 小型爆發股・動能深蹲作戰手冊 V1.0")
-    st.info("💡 專為『股本 5~20 億、5 槽位分散風險、爆發力極致』設計的量化交易系統。")
+    st.subheader("📖 小型爆發股・動能深蹲作戰手冊 V1.0 (方案 A 星級評分制)")
+    st.info("💡 專為『股本 5~20 億、5 槽位分散、MACD+KD 雙重評級』設計的量化交易系統。")
 
-    with st.expander("🔍 一、 2»1»4»3 漏斗篩選 SOP", expanded=True):
+    with st.expander("🔍 一、 2»1»4»3 漏斗 ＋ 方案 A 星級評分 SOP", expanded=True):
         st.write("• **第 1 步【第二道・籌碼密集度】**：投信近 5 日累計買超 >= 15 張，或三大法人合計買超 >= 80 張。")
-        st.write("• **第 2 步【第一道・規模與健康流動性】**：實收資本額 5 億 ～ 20 億元，且近 5 日日均量 >= 500 張 (防止滑價)。")
-        st.write("• **第 3 步【第四道・技術面深蹲壓縮】**：回踩 5MA 或 10MA，成交量低於 5MV & 20MV，K 棒實體振幅 <= 3.5%。")
+        st.write("• **第 2 步【第一道・規模與健康流動性】**：實收資本額 5 億 ～ 20 億元，且近 5 日日均量 >= 500 張。")
+        st.write("• **第 3 步【第四道・技術面深蹲壓縮 ＋ MACD 核心動能】**：回踩 5MA 或 10MA，成交量低於 5MV & 20MV，K 棒實體振幅 <= 3.5%，且 **MACD DIF > 0 柱狀體翻紅或縮短**。")
         st.write("• **第 4 步【第三道・營收動能加速】**：最新單月營收年增率 YoY >= 20.0%。")
+        st.write("• **🌟🌟🌟 3 星黃金狙擊點判定**：若同時滿足上述條件 ＋ **KD 位於 30～65 且轉折向上/金叉**，標記為 3 星，實盤系統優先分配資金開倉！")
 
     with st.expander("🛑 二、 5 槽位出賽與風控紀律", expanded=True):
-        st.write("• **5 槽位分散模型**：60 萬總資金切分為 5 槽位，每槽 12 萬元，避免小型股單一個股黑天鵝。")
+        st.write("• **5 槽位分散模型**：60 萬總資金切分為 5 槽位，每槽 12 萬元。")
         st.write("• **🛑 防線 1【硬停損 (-5.0%)】**：跌破成本 -5.0% 無條件出清。")
         st.write("• **⏳ 防線 2【時間停損 (5個交易日)】**：持有滿 5 個開盤交易日漲幅未達 +1.0% 平手換股；若再次深蹲且在成本之上，允許展延至滿 7 天。")
         st.write("• **🛡️ 防線 3【動態保本 (+4.5%)】**：浮盈達 +4.5% 時，次日起停損推至成本價 (+0.2%)。")
