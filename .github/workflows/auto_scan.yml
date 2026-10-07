@@ -1,0 +1,38 @@
+name: Daily Small-Cap Stock Radar (16:40)
+
+on:
+  schedule:
+    # 台灣時間 16:40 (UTC 08:40) 執行盤後運算
+    - cron: '40 8 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run-radar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 檢出專案代碼
+        uses: actions/checkout@v3
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 安裝相依套件
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 執行小型股雷達篩選 (screener.py)
+        run: python screener.py
+
+      - name: 執行 5 槽位實盤追蹤結算 (tracker.py)
+        run: python tracker.py
+
+      - name: 自動將最新戰報推送回儲存庫
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add radar_report.json positions.json trade_history.csv || true
+          git commit -m "🤖 [Actions] 每日盤後小型股獵股雷達與持倉自動更新" || true
+          git push
